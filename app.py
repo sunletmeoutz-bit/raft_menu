@@ -344,43 +344,112 @@ def excel_полный(параметры, план_df, блюда_df, заку�
 
     bio = io.BytesIO(); wb.save(bio); bio.seek(0); return bio
 
-def pdf_закупка(закупка_df, font_path="DejaVuSans.ttf"):
-    """PDF только с закупкой (кириллица через TTF)."""
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+def pdf_план_и_закупка(план_df, закупка_df, параметры, font_path="DejaVuSans.ttf"):
+    """PDF: План по дням + Итоговая закупка (кириллица)."""
+    import os, io
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
-    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 
+    # Шрифт для кириллицы
     font_name = "Cyrillic"
     if os.path.exists(font_path):
         pdfmetrics.registerFont(TTFont(font_name, font_path))
     else:
-        font_name = "Helvetica"
+        font_name = "Helvetica"  # на всякий случай
 
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    # Стили
     styles = getSampleStyleSheet()
     styles["Title"].fontName = font_name
+    styles["Heading2"].fontName = font_name
+    styles["Normal"].fontName = font_name
+    h2 = ParagraphStyle("H2", parent=styles["Heading2"], spaceAfter=6)
+    small = ParagraphStyle("Small", parent=styles["Normal"], fontSize=9, leading=12)
 
-    story = [Paragraph("Итоговая закупка для сплава", styles["Title"])]
-    data = [["Ингредиент","Ед.изм","Итого"]] + закупка_df.astype(str).values.tolist()
-    from reportlab.platypus import Table
-    table = Table([list(закупка_df.columns)] + закупка_df.astype(str).values.tolist(), repeatRows=1)
-    table.setStyle([
-        ('FONTNAME', (0,0), (-1,-1), font_name),
-        ('BACKGROUND', (0,0), (-1,0), colors.lightblue),
-        ('TEXTCOLOR', (0,0), (-1,0), colors.black),
-        ('FONTSIZE', (0,0), (-1,-1), 10),
-        ('ALIGN',(0,0),(-1,-1),'LEFT'),
-        ('BOTTOMPADDING', (0,0), (-1,0), 6),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-    ])
-    story.append(table)
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=28, rightMargin=28, topMargin=28, bottomMargin=28)
+    story = []
+
+    # ====== БЛОК 1: План по дням ======
+    title = f"ПЛАН ПИТАНИЯ • дни: {параметры['days']} • участников: {параметры['participants']}"
+    story.append(Paragraph(title, styles["Title"]))
+    story.append(Spacer(1, 6))
+
+    # аккуратно сформируем таблицы по дням
+    приёмы = ["Завтрак", "Обед", "Ужин"]
+    if "Приём пищи" in план_df.columns:
+        # убедимся в порядке
+        план_df = план_df.copy()
+        план_df["Приём пищи"] = pd.Categorical(план_df["Приём пищи"], categories=приёмы, ordered=True)
+
+    max_day = int(план_df["День"].max()) if not план_df.empty else int(параметры["days"])
+    for d in range(1, max_day + 1):
+        story.append(Paragraph(f"День {d}", h2))
+        subset = план_df[план_df["День"] == d] if not план_df.empty else pd.DataFrame(columns=["Приём пищи","Блюдо"])
+        rows = [["Приём пищи", "Блюдо"]]
+        for p in приёмы:
+            блюдо = subset.loc[subset["Приём пищи"] == p, "Блюдо"]
+            name = str(блюдо.iloc[0]) if len(блюдо) else None
+            if not name or name == "None" or pd.isna(name):
+                name = "— не выбрано —"
+            rows.append([p, name])
+
+        t = Table(rows, colWidths=[85, 400], repeatRows=1)
+        t.setStyle(TableStyle([
+            ('FONTNAME', (0,0), (-1,-1), font_name),
+            ('BACKGROUND', (0,0), (-1,0), colors.whitesmoke),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
+            ('ALIGN',(0,0),(-1,-1),'LEFT'),
+            ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+        ]))
+        story.append(t)
+        story.append(Spacer(1, 8))
+
+    # Разделитель страниц
+    story.append(PageBreak())
+
+    # ====== БЛОК 2: Итоговая закупка ======
+    story.append(Paragraph("ИТОГОВАЯ ЗАКУПКА", styles["Title"]))
+    if закупка_df is None or закупка_df.empty:
+        story.append(Paragraph("Закупка пуста (не выбраны блюда в плане).", styles["Normal"]))
+    else:
+        # Если у тебя есть поле "Категория" — можно группировать по нему.
+        if "Категория" in закупка_df.columns:
+            for cat, block in закупка_df.groupby("Категория"):
+                story.append(Spacer(1, 6))
+                story.append(Paragraph(f"Категория: {cat}", h2))
+                data = [["Ингредиент", "Ед.изм", "Итого"]]
+                for _, r in block.iterrows():
+                    data.append([str(r["Ингредиент"]), str(r["Ед.изм"]), f'{float(r["Итого"]):g}'])
+                tt = Table(data, colWidths=[290, 70, 100], repeatRows=1)
+                tt.setStyle(TableStyle([
+                    ('FONTNAME', (0,0), (-1,-1), font_name),
+                    ('BACKGROUND', (0,0), (-1,0), colors.lightblue),
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+                    ('ALIGN',(0,0),(-1,-1),'LEFT'),
+                ]))
+                story.append(tt)
+        else:
+            data = [["Ингредиент", "Ед.изм", "Итого"]] + [
+                [str(r["Ингредиент"]), str(r["Ед.изм"]), f'{float(r["Итого"]):g}']
+                for _, r in закупка_df.iterrows()
+            ]
+            tt = Table(data, colWidths=[290, 70, 100], repeatRows=1)
+            tt.setStyle(TableStyle([
+                ('FONTNAME', (0,0), (-1,-1), font_name),
+                ('BACKGROUND', (0,0), (-1,0), colors.lightblue),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+                ('ALIGN',(0,0),(-1,-1),'LEFT'),
+            ]))
+            story.append(Spacer(1, 6))
+            story.append(tt)
+
     doc.build(story)
-    buffer.seek(0)
-    return buffer
+    buf.seek(0)
+    return buf
 
 # Кнопка Excel
 excel_bytes = excel_полный(
@@ -396,16 +465,21 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
 
-# Кнопка PDF
+# Скачать PDF: План + Закупка
 try:
-    pdf_bytes = pdf_закупка(итог)
+    pdf_bytes = pdf_план_и_закупка(
+        план_df=план_df,
+        закупка_df=итог,
+        параметры={"days": int(дни), "participants": int(участники)}
+    )
     st.download_button(
-        "📄 Скачать PDF (только закупка)",
+        "📄 Скачать PDF (план + закупка)",
         data=pdf_bytes,
-        file_name="закупка.pdf",
+        file_name="план_и_закупка.pdf",
         mime="application/pdf"
     )
 except Exception as e:
-    st.warning(f"PDF недоступен: {e}. Проверь, что рядом лежит DejaVuSans.ttf и установлен reportlab.")
+    st.warning(f"PDF недоступен: {e}. Убедись, что рядом с app.py лежит DejaVuSans.ttf и установлен reportlab.")
+
 
 
