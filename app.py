@@ -166,9 +166,17 @@ else:
             sub = sub[sub["Ингредиент"].str.contains(search, case=False, na=False)]
 
         with st.expander(f"{dish} · {len(sub)} инг.", expanded=False):
-            st.dataframe(sub.reset_index(drop=True), use_container_width=True, height=220)
-            total_gram = sub.loc[sub["Ед.изм"].isin(["г","мл"]), "Норма на человека"].sum()
-            st.caption(f"Суммарно на 1 чел (г/мл): {total_gram:g}" if total_gram else " ")
+            grams_total = 0.0
+
+            for _, row in sub.iterrows():
+                ingr = str(row["Ингредиент"])
+                unit = str(row["Ед.изм"])
+                qty  = row["Норма на человека"]
+                st.write(f"▫️ {ingr} — {qty:g} {unit}")
+                if unit in ("г", "мл") and pd.notna(qty):
+                    grams_total += float(qty)
+            if grams_total:
+                st.caption(f"Суммарно на 1 чел (г/мл): {grams_total:g}")
 
 # ---------- ПЛАН ПО ДНЯМ И ПРИЁМАМ ПИЩИ (видит только выбранные блюда) ----------
 st.subheader("🗓️ План по дням и приёмам пищи")
@@ -336,5 +344,6 @@ try:
     )
 except Exception as e:
     st.warning(f"PDF недоступен: {e}. Проверь, что рядом лежит DejaVuSans.ttf и установлен reportlab.")
+
 
 
