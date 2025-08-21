@@ -12,6 +12,69 @@ st.set_page_config(
     page_icon="🍲",
     layout="centered",
 )
+st.markdown("""
+<style>
+#MainMenu {visibility: hidden;}
+header {visibility: hidden;}
+footer {visibility: hidden;}
+button[kind="header"] {display:none;}
+</style>
+""", unsafe_allow_html=True)
+from streamlit.components.v1 import html
+
+html("""
+<script>
+(function () {
+  // Не показываем, если уже добавлено как standalone (PWA-режим)
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+                       || window.navigator.standalone === true;
+  if (isStandalone) return;
+
+  // Не показывать повторно, если человек закрыл баннер
+  if (localStorage.getItem('installHintClosed') === '1') return;
+
+  // Определяем платформу
+  const ua = navigator.userAgent.toLowerCase();
+  const isIOS = /iphone|ipad|ipod/.test(ua);
+  const isAndroid = /android/.test(ua);
+
+  // Текст подсказки
+  let text = '';
+  if (isAndroid) {
+    text = 'Чтобы установить на главный экран: откройте меню ⋮ → «Добавить на главный экран».';
+  } else if (isIOS) {
+    text = 'Чтобы установить на главный экран: нажмите «Поделиться» → «На экран “Домой”». (Открывайте в Safari)';
+  } else {
+    // Для десктопа/прочих — ничего не показываем
+    return;
+  }
+
+  // Рисуем плавающий баннер
+  const bar = document.createElement('div');
+  bar.style.cssText = 
+    position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 9999;
+    background: #1f2937; color: #fff; border: 1px solid #374151; border-radius: 12px;
+    padding: 10px 14px; font-size: 14px; line-height: 1.35; box-shadow: 0 8px 20px rgba(0,0,0,.25);
+  ;
+  bar.innerHTML = 
+    <div style="display:flex; gap:10px; align-items:flex-start;">
+      <div style="font-size:18px">📲</div>
+      <div style="flex:1">${text}</div>
+      <button id="closeInstallHint" style="
+        background:#ff7043; color:#fff; border:none; border-radius:8px; padding:6px 10px; font-weight:600; cursor:pointer;">
+        Ок
+      </button>
+    </div>
+  ;
+  document.body.appendChild(bar);
+
+  document.getElementById('closeInstallHint').addEventListener('click', () => {
+    localStorage.setItem('installHintClosed','1');
+    bar.remove();
+  }, {once:true});
+})();
+</script>
+""", height=0)
 
 st.markdown("""
 <style>
@@ -344,6 +407,5 @@ try:
     )
 except Exception as e:
     st.warning(f"PDF недоступен: {e}. Проверь, что рядом лежит DejaVuSans.ttf и установлен reportlab.")
-
 
 
